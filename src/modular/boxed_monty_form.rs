@@ -29,7 +29,7 @@ pub struct BoxedMontyParams {
     /// Parameter used in Montgomery reduction
     one: BoxedUint,
     /// R^2, used to move into Montgomery form
-    r2: BoxedUint,
+    pub r2: BoxedUint,
     /// R^3, used to compute the multiplicative inverse
     r3: BoxedUint,
     /// The lowest limbs of -(MODULUS^-1) mod R
@@ -134,8 +134,16 @@ pub struct BoxedMontyForm {
 
 impl BoxedMontyForm {
     /// Instantiates a new [`BoxedMontyForm`] that represents an integer modulo the provided params.
-    pub fn new(mut integer: BoxedUint, params: BoxedMontyParams) -> Self {
-        debug_assert_eq!(integer.bits_precision(), params.bits_precision());
+    pub fn new(integer: BoxedUint, params: BoxedMontyParams) -> Self {
+        assert!(
+            integer.bits_precision() <= params.bits_precision(),
+            "short params cannot be automatically widened"
+        );
+        let mut integer = if integer.bits_precision() < params.bits_precision() {
+            integer.widen(params.modulus().bits_precision())
+        } else {
+            integer
+        };
         convert_to_montgomery(&mut integer, &params);
 
         #[allow(clippy::useless_conversion)]
@@ -279,6 +287,26 @@ mod tests {
     fn new_params_with_valid_modulus() {
         let modulus = Odd::new(BoxedUint::from(3u8)).unwrap();
         BoxedMontyParams::new(modulus);
+    }
+
+    #[test]
+    fn new_monty_automatic_widening() {
+        let modulus = Odd::new(BoxedUint::from(3u8).widen(512)).unwrap();
+        let params = BoxedMontyParams::new(modulus);
+        let short_int = BoxedUint::one_with_precision(256);
+        let medium_int = BoxedUint::one_with_precision(512);
+
+        let _short_residue = BoxedMontyForm::new(short_int, params.clone());
+        let _medium_residue = BoxedMontyForm::new(medium_int, params.clone());
+    }
+
+    #[test]
+    #[should_panic]
+    fn new_monty_automatic_widening_fail() {
+        let modulus = Odd::new(BoxedUint::from(3u8).widen(512)).unwrap();
+        let params = BoxedMontyParams::new(modulus);
+        let long_int = BoxedUint::one_with_precision(1024);
+        BoxedMontyForm::new(long_int, params);
     }
 
     #[test]
